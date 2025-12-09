@@ -1,7 +1,9 @@
 name: blue_thermal_mais
-description: "Plugin feito para imprimir em impressoras termicas via bluetooth."
+description: Plugin Flutter para impressão térmica via Bluetooth com suporte moderno ao Android 12+.
 version: 0.0.1
-homepage:
+homepage: https://github.com/mateuspc/blue_thermal_mais
+repository: https://github.com/mateuspc/blue_thermal_mais
+issue_tracker: https://github.com/mateuspc/blue_thermal_mais/issues
 
 environment:
   sdk: ^3.10.0
