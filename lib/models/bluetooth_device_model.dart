@@ -12,9 +12,6 @@ class BluetoothDeviceModel {
   }
 
   Map<String, dynamic> toMap() {
-    return {
-      'name': name,
-      'address': address,
-    };
+    return {'name': name, 'address': address};
   }
 }

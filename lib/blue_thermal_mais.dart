@@ -1,4 +1,5 @@
-import 'package:flutter/services.dart'; // Necessário para PlatformException
+import 'package:flutter/services.dart';
+
 import 'blue_thermal_mais_platform_interface.dart';
 import 'models/bluetooth_device_model.dart';
 
@@ -37,12 +38,14 @@ class BlueThermalMais {
       if (e.code == 'PAIRING_INITIATED') {
         // O Android iniciou o processo de pareamento (popup de PIN).
         // Lançamos um erro legível para você mostrar um SnackBar/Toast na UI.
-        throw Exception("Pareamento iniciado. Aceite a notificação no celular e tente conectar novamente.");
+        throw Exception(
+          "Pareamento iniciado. Aceite a notificação no celular e tente conectar novamente.",
+        );
       } else if (e.code == 'NEEDS_BONDING') {
-        throw Exception("O dispositivo precisa ser pareado nas configurações do Bluetooth primeiro.");
+        throw Exception(
+          "O dispositivo precisa ser pareado nas configurações do Bluetooth primeiro.",
+        );
       }
-      // Se for outro erro, apenas retornamos false ou repassamos o erro
-      print("Erro ao conectar: ${e.message}");
       return false;
     }
   }

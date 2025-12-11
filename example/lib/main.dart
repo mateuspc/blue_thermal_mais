@@ -1,6 +1,5 @@
 import 'dart:convert'; // Para utf8.encode
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'dart:async';
 
 import 'package:blue_thermal_mais/blue_thermal_mais.dart';
@@ -81,7 +80,10 @@ class _PrinterPageState extends State<PrinterPage> {
     if (statuses.values.every((status) => status.isGranted)) {
       _scan();
     } else {
-      _showSnack("Permissões negadas! Verifique as configurações.", color: Colors.red);
+      _showSnack(
+        "Permissões negadas! Verifique as configurações.",
+        color: Colors.red,
+      );
     }
   }
 
@@ -97,18 +99,21 @@ class _PrinterPageState extends State<PrinterPage> {
     });
 
     try {
-      _scanSubscription = _blueThermalMais.scan().listen((deviceList) {
-        if (!mounted) return;
-        setState(() {
-          _devices = deviceList;
-          // Não setamos isLoading = false aqui porque o scan é contínuo
-          // O usuário deve parar manualmente ou ao conectar
-        });
-      }, onError: (e) {
-        if (!mounted) return;
-        setState(() => _isLoading = false);
-        _showSnack("Erro no scan: $e", color: Colors.red);
-      });
+      _scanSubscription = _blueThermalMais.scan().listen(
+        (deviceList) {
+          if (!mounted) return;
+          setState(() {
+            _devices = deviceList;
+            // Não setamos isLoading = false aqui porque o scan é contínuo
+            // O usuário deve parar manualmente ou ao conectar
+          });
+        },
+        onError: (e) {
+          if (!mounted) return;
+          setState(() => _isLoading = false);
+          _showSnack("Erro no scan: $e", color: Colors.red);
+        },
+      );
     } catch (e) {
       setState(() => _isLoading = false);
       _showSnack("Erro ao iniciar scan: $e", color: Colors.red);
@@ -168,22 +173,22 @@ class _PrinterPageState extends State<PrinterPage> {
   // Helper para mostrar alerta de pareamento
   void _showDialogPairingInfo() {
     showDialog(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: const Text("Pareamento Necessário"),
-          content: const Text(
-              "O Android iniciou o processo de pareamento.\n\n"
-                  "1. Verifique a notificação na barra superior ou um popup na tela.\n"
-                  "2. Digite o PIN (geralmente 0000 ou 1234).\n"
-                  "3. Após parear, toque no dispositivo aqui novamente para conectar."
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text("Pareamento Necessário"),
+        content: const Text(
+          "O Android iniciou o processo de pareamento.\n\n"
+          "1. Verifique a notificação na barra superior ou um popup na tela.\n"
+          "2. Digite o PIN (geralmente 0000 ou 1234).\n"
+          "3. Após parear, toque no dispositivo aqui novamente para conectar.",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text("Entendi"),
           ),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text("Entendi")
-            )
-          ],
-        )
+        ],
+      ),
     );
   }
 
@@ -209,11 +214,11 @@ class _PrinterPageState extends State<PrinterPage> {
   void _showSnack(String msg, {Color? color}) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(msg),
-          backgroundColor: color,
-          duration: const Duration(seconds: 3),
-        )
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: color,
+        duration: const Duration(seconds: 3),
+      ),
     );
   }
 
@@ -232,9 +237,12 @@ class _PrinterPageState extends State<PrinterPage> {
           else
             IconButton(
               icon: const Icon(Icons.refresh),
-              onPressed: () { _checkBluetoothStatus(); _scan(); },
+              onPressed: () {
+                _checkBluetoothStatus();
+                _scan();
+              },
               tooltip: "Escanear",
-            )
+            ),
         ],
       ),
       body: Column(
@@ -245,15 +253,23 @@ class _PrinterPageState extends State<PrinterPage> {
             color: _isBluetoothOn ? Colors.blue[50] : Colors.red[50],
             child: Row(
               children: [
-                Icon(_isBluetoothOn ? Icons.bluetooth : Icons.bluetooth_disabled),
+                Icon(
+                  _isBluetoothOn ? Icons.bluetooth : Icons.bluetooth_disabled,
+                ),
                 const SizedBox(width: 10),
-                Text(_isBluetoothOn ? "Bluetooth Ligado" : "Bluetooth Desligado"),
+                Text(
+                  _isBluetoothOn ? "Bluetooth Ligado" : "Bluetooth Desligado",
+                ),
                 if (_isLoading) ...[
                   const Spacer(),
-                  const SizedBox(width: 15, height: 15, child: CircularProgressIndicator(strokeWidth: 2)),
+                  const SizedBox(
+                    width: 15,
+                    height: 15,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
                   const SizedBox(width: 10),
                   const Text("Buscando..."),
-                ]
+                ],
               ],
             ),
           ),
@@ -267,8 +283,16 @@ class _PrinterPageState extends State<PrinterPage> {
                 children: [
                   const Icon(Icons.print, color: Colors.green),
                   const SizedBox(width: 10),
-                  Expanded(child: Text("Conectado a: ${_connectedDevice!.name}", style: const TextStyle(fontWeight: FontWeight.bold))),
-                  TextButton(onPressed: _disconnect, child: const Text("Desconectar"))
+                  Expanded(
+                    child: Text(
+                      "Conectado a: ${_connectedDevice!.name}",
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: _disconnect,
+                    child: const Text("Desconectar"),
+                  ),
                 ],
               ),
             ),
@@ -289,22 +313,33 @@ class _PrinterPageState extends State<PrinterPage> {
             child: _devices.isEmpty
                 ? const Center(child: Text("Nenhum dispositivo encontrado."))
                 : ListView.builder(
-              itemCount: _devices.length,
-              itemBuilder: (context, index) {
-                final dev = _devices[index];
-                final isConnected = _connectedDevice?.address == dev.address;
+                    itemCount: _devices.length,
+                    itemBuilder: (context, index) {
+                      final dev = _devices[index];
+                      final isConnected =
+                          _connectedDevice?.address == dev.address;
 
-                return ListTile(
-                  leading: Icon(Icons.bluetooth, color: isConnected ? Colors.green : Colors.grey),
-                  title: Text(dev.name.isNotEmpty ? dev.name : "Sem Nome"),
-                  subtitle: Text(dev.address), // No iOS mostra UUID, no Android MAC
-                  onTap: isConnected ? null : () => _connect(dev),
-                  trailing: isConnected
-                      ? const Icon(Icons.check_circle, color: Colors.green)
-                      : const Icon(Icons.chevron_right),
-                );
-              },
-            ),
+                      return ListTile(
+                        leading: Icon(
+                          Icons.bluetooth,
+                          color: isConnected ? Colors.green : Colors.grey,
+                        ),
+                        title: Text(
+                          dev.name.isNotEmpty ? dev.name : "Sem Nome",
+                        ),
+                        subtitle: Text(
+                          dev.address,
+                        ), // No iOS mostra UUID, no Android MAC
+                        onTap: isConnected ? null : () => _connect(dev),
+                        trailing: isConnected
+                            ? const Icon(
+                                Icons.check_circle,
+                                color: Colors.green,
+                              )
+                            : const Icon(Icons.chevron_right),
+                      );
+                    },
+                  ),
           ),
 
           // Botão de Imprimir
@@ -314,9 +349,15 @@ class _PrinterPageState extends State<PrinterPage> {
               width: double.infinity,
               height: 50,
               child: ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent, foregroundColor: Colors.white),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.blueAccent,
+                  foregroundColor: Colors.white,
+                ),
                 onPressed: _connectedDevice != null ? _printTest : null,
-                child: const Text("IMPRIMIR TESTE", style: TextStyle(fontSize: 18)),
+                child: const Text(
+                  "IMPRIMIR TESTE",
+                  style: TextStyle(fontSize: 18),
+                ),
               ),
             ),
           ),

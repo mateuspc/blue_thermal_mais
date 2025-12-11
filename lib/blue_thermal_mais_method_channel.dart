@@ -12,7 +12,9 @@ class MethodChannelBlueThermalMais extends BlueThermalMaisPlatform {
 
   @override
   Future<String?> getPlatformVersion() async {
-    final version = await methodChannel.invokeMethod<String>('getPlatformVersion');
+    final version = await methodChannel.invokeMethod<String>(
+      'getPlatformVersion',
+    );
     return version;
   }
 
@@ -30,7 +32,11 @@ class MethodChannelBlueThermalMais extends BlueThermalMaisPlatform {
     // Escuta o stream de resultados
     return eventChannel.receiveBroadcastStream().map((dynamic event) {
       final List<dynamic> list = event;
-      return list.map((e) => BluetoothDeviceModel.fromMap(Map<String, dynamic>.from(e))).toList();
+      return list
+          .map(
+            (e) => BluetoothDeviceModel.fromMap(Map<String, dynamic>.from(e)),
+          )
+          .toList();
     });
   }
 
@@ -43,7 +49,9 @@ class MethodChannelBlueThermalMais extends BlueThermalMaisPlatform {
   @override
   Future<bool> connect(String address) async {
     // Envia o address (String) para o nativo
-    final result = await methodChannel.invokeMethod<bool>('connect', {'address': address});
+    final result = await methodChannel.invokeMethod<bool>('connect', {
+      'address': address,
+    });
     return result ?? false;
   }
 
@@ -55,7 +63,9 @@ class MethodChannelBlueThermalMais extends BlueThermalMaisPlatform {
 
   @override
   Future<bool> printRaw(List<int> bytes) async {
-    final result = await methodChannel.invokeMethod<bool>('print', {'bytes': Uint8List.fromList(bytes)});
+    final result = await methodChannel.invokeMethod<bool>('print', {
+      'bytes': Uint8List.fromList(bytes),
+    });
     return result ?? false;
   }
 }
