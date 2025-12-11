@@ -15,7 +15,8 @@ abstract class BlueThermalMaisPlatform extends PlatformInterface {
     _instance = instance;
   }
 
-  // Métodos abstratos que as plataformas devem implementar
+  // --- Métodos ---
+
   Future<String?> getPlatformVersion() {
     throw UnimplementedError('getPlatformVersion() has not been implemented.');
   }
@@ -26,6 +27,11 @@ abstract class BlueThermalMaisPlatform extends PlatformInterface {
 
   Stream<List<BluetoothDeviceModel>> scan() {
     throw UnimplementedError('scan() has not been implemented.');
+  }
+
+  /// NOVO: Método essencial para parar o scan antes de conectar
+  Future<void> stopScan() {
+    throw UnimplementedError('stopScan() has not been implemented.');
   }
 
   Future<bool> connect(String address) {

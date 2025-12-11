@@ -11,8 +11,9 @@ public class BlueThermalMaisPlugin: NSObject, FlutterPlugin, CBCentralManagerDel
 
     // Canais de comunicação
     var eventSink: FlutterEventSink?
+    var methodChannel: FlutterMethodChannel?
 
-    // Resultado pendente para conexão (para avisar o Flutter quando terminar)
+    // Resultado pendente para conexão
     var pendingConnectionResult: FlutterResult?
 
     public static func register(with registrar: FlutterPluginRegistrar) {
@@ -20,11 +21,12 @@ public class BlueThermalMaisPlugin: NSObject, FlutterPlugin, CBCentralManagerDel
         let eventChannel = FlutterEventChannel(name: "blue_thermal_mais/scan", binaryMessenger: registrar.messenger())
 
         let instance = BlueThermalMaisPlugin()
+        instance.methodChannel = channel
 
         registrar.addMethodCallDelegate(instance, channel: channel)
         eventChannel.setStreamHandler(instance)
 
-        // Inicializa o manager
+        // Inicializa o manager (Apenas cria, não escaneia ainda)
         instance.centralManager = CBCentralManager(delegate: instance, queue: nil)
     }
 
@@ -32,11 +34,18 @@ public class BlueThermalMaisPlugin: NSObject, FlutterPlugin, CBCentralManagerDel
         switch call.method {
         case "getPlatformVersion":
             result("iOS " + UIDevice.current.systemVersion)
+
         case "isOn":
             result(centralManager.state == .poweredOn)
+
         case "startScan":
             startScan()
-            result(nil)
+            result(nil) // Retorno imediato, dados vão via Stream
+
+        case "stopScan":
+            centralManager.stopScan()
+            result(true)
+
         case "connect":
             guard let args = call.arguments as? [String: Any],
                   let uuidString = args["address"] as? String else {
@@ -44,9 +53,11 @@ public class BlueThermalMaisPlugin: NSObject, FlutterPlugin, CBCentralManagerDel
                 return
             }
             connectToDevice(uuidString: uuidString, result: result)
+
         case "disconnect":
             disconnectDevice()
             result(true)
+
         case "print":
             guard let args = call.arguments as? [String: Any],
                   let flutterData = args["bytes"] as? FlutterStandardTypedData else {
@@ -54,41 +65,55 @@ public class BlueThermalMaisPlugin: NSObject, FlutterPlugin, CBCentralManagerDel
                 return
             }
             printData(data: flutterData.data, result: result)
+
         default:
             result(FlutterMethodNotImplemented)
         }
     }
 
-    // MARK: - Logic Adapted from your BluetoothViewModel
+    // MARK: - Lógica de Bluetooth
 
     func startScan() {
         discoveredPeripherals.removeAll()
+        // Limpa a lista na UI do Flutter enviando lista vazia
+        eventSink?([])
+
         if centralManager.state == .poweredOn {
+            // Escaneia tudo (nil em services).
             centralManager.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
         }
     }
 
     func connectToDevice(uuidString: String, result: @escaping FlutterResult) {
-        // Procura na lista de descobertos
+        // 1. Tenta achar na lista de escaneados recentes
         if let peripheral = discoveredPeripherals.first(where: { $0.identifier.uuidString == uuidString }) {
-            self.pendingConnectionResult = result
-            centralManager.stopScan()
-            connectedPeripheral = peripheral
-            peripheral.delegate = self
-            centralManager.connect(peripheral, options: nil)
-        } else {
-            // Tenta recuperar pelo UUID se o sistema já conhece
-            if let uuid = UUID(uuidString: uuidString),
-               let known = centralManager.retrievePeripherals(withIdentifiers: [uuid]).first {
-                self.pendingConnectionResult = result
-                centralManager.stopScan()
-                connectedPeripheral = known
-                known.delegate = self
-                centralManager.connect(known, options: nil)
-            } else {
-                result(FlutterError(code: "NOT_FOUND", message: "Device not found in cache", details: nil))
-            }
+            initiateConnection(peripheral, result: result)
         }
+        // 2. Se não achou, tenta recuperar pelo UUID (caso o app tenha sido reiniciado)
+        else if let uuid = UUID(uuidString: uuidString),
+                let known = centralManager.retrievePeripherals(withIdentifiers: [uuid]).first {
+            initiateConnection(known, result: result)
+        } else {
+            result(FlutterError(code: "NOT_FOUND", message: "Device not found", details: nil))
+        }
+    }
+
+    func initiateConnection(_ peripheral: CBPeripheral, result: @escaping FlutterResult) {
+        self.pendingConnectionResult = result
+        centralManager.stopScan()
+
+        // Se já estiver conectado, apenas retornamos sucesso
+        if peripheral.state == .connected {
+             peripheral.delegate = self
+             self.connectedPeripheral = peripheral
+             // Dispara descoberta de serviços novamente só por garantia
+             peripheral.discoverServices(nil)
+             return
+        }
+
+        connectedPeripheral = peripheral
+        peripheral.delegate = self
+        centralManager.connect(peripheral, options: nil)
     }
 
     func disconnectDevice() {
@@ -99,27 +124,27 @@ public class BlueThermalMaisPlugin: NSObject, FlutterPlugin, CBCentralManagerDel
 
     func printData(data: Data, result: @escaping FlutterResult) {
         guard let peripheral = connectedPeripheral, let characteristic = writeCharacteristic else {
-            result(FlutterError(code: "NOT_CONNECTED", message: "No active connection or characteristic", details: nil))
+            result(FlutterError(code: "NOT_CONNECTED", message: "No active connection", details: nil))
             return
         }
 
-        // Define tipo de escrita baseada na característica (adaptado do seu código)
+        // Detecta se a impressora suporta resposta ou não
         let type: CBCharacteristicWriteType = characteristic.properties.contains(.write) ? .withResponse : .withoutResponse
         peripheral.writeValue(data, for: characteristic, type: type)
 
-        // Como BLE write pode ser assíncrono "fire and forget" para sem resposta:
+        // Para WriteWithoutResponse, o retorno é imediato.
+        // Para WithResponse, deveríamos esperar o delegate, mas simplificamos aqui.
         result(true)
     }
 
     // MARK: - CBCentralManagerDelegate
 
     public func centralManagerDidUpdateState(_ central: CBCentralManager) {
-        if central.state == .poweredOn {
-            // Opcional: Auto scan se desejar
-        }
+        // Opcional: Notificar Flutter que o estado do BT mudou
     }
 
     public func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String : Any], rssi RSSI: NSNumber) {
+        // Filtro básico: Apenas dispositivos com nome
         if !discoveredPeripherals.contains(where: { $0.identifier == peripheral.identifier }) && peripheral.name != nil {
             discoveredPeripherals.append(peripheral)
             sendUpdateToFlutter()
@@ -127,7 +152,6 @@ public class BlueThermalMaisPlugin: NSObject, FlutterPlugin, CBCentralManagerDel
     }
 
     public func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        // Busca serviços assim que conecta
         peripheral.discoverServices(nil)
     }
 
@@ -140,9 +164,10 @@ public class BlueThermalMaisPlugin: NSObject, FlutterPlugin, CBCentralManagerDel
     public func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         connectedPeripheral = nil
         writeCharacteristic = nil
+        // Opcional: Avisar o Flutter que desconectou via MethodChannel
     }
 
-    // MARK: - CBPeripheralDelegate (Discovery Flow)
+    // MARK: - CBPeripheralDelegate
 
     public func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         guard let services = peripheral.services else { return }
@@ -155,36 +180,34 @@ public class BlueThermalMaisPlugin: NSObject, FlutterPlugin, CBCentralManagerDel
         guard let characteristics = service.characteristics else { return }
 
         for characteristic in characteristics {
-            // Lógica do seu código: busca característica com permissão de escrita
+            // Procura característica de escrita
             if characteristic.properties.contains(.write) || characteristic.properties.contains(.writeWithoutResponse) {
                 self.writeCharacteristic = characteristic
 
-                // Agora sim estamos prontos
+                // Conexão concluída com sucesso!
                 if let pending = pendingConnectionResult {
                     pending(true)
                     pendingConnectionResult = nil
                 }
-                return // Achou uma, para.
+                return
             }
         }
     }
 
-    // MARK: - Helper to send data to Flutter
+    // MARK: - Helper Stream
 
     func sendUpdateToFlutter() {
         guard let sink = eventSink else { return }
-
         let devicesList = discoveredPeripherals.map { p -> [String: String] in
             return [
-                "name": p.name ?? "Sem Nome",
-                "address": p.identifier.uuidString // No iOS usamos UUID, não MAC
+                "name": p.name ?? "Unknown",
+                "address": p.identifier.uuidString // UUID no iOS
             ]
         }
         sink(devicesList)
     }
 
     // MARK: - FlutterStreamHandler
-
     public func onListen(withArguments arguments: Any?, eventSink events: @escaping FlutterEventSink) -> FlutterError? {
         self.eventSink = events
         return nil

@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'blue_thermal_mais_platform_interface.dart';
@@ -8,61 +7,55 @@ class MethodChannelBlueThermalMais extends BlueThermalMaisPlatform {
   @visibleForTesting
   final methodChannel = const MethodChannel('blue_thermal_mais');
 
-  // Canal de Eventos para receber o Scan em tempo real
+  @visibleForTesting
   final eventChannel = const EventChannel('blue_thermal_mais/scan');
 
   @override
   Future<String?> getPlatformVersion() async {
-    return await methodChannel.invokeMethod<String>('getPlatformVersion');
+    final version = await methodChannel.invokeMethod<String>('getPlatformVersion');
+    return version;
   }
 
   @override
   Future<bool> isOn() async {
-    final result = await methodChannel.invokeMethod<bool>('isOn');
-    return result ?? false;
+    final status = await methodChannel.invokeMethod<bool>('isOn');
+    return status ?? false;
   }
 
   @override
   Stream<List<BluetoothDeviceModel>> scan() {
-    // Inicia o scan no lado nativo
+    // Inicia o scan nativo
     methodChannel.invokeMethod('startScan');
 
     // Escuta o stream de resultados
     return eventChannel.receiveBroadcastStream().map((dynamic event) {
-      List<dynamic> list = event;
-      return list.map((e) => BluetoothDeviceModel.fromMap(e)).toList();
+      final List<dynamic> list = event;
+      return list.map((e) => BluetoothDeviceModel.fromMap(Map<String, dynamic>.from(e))).toList();
     });
+  }
+
+  /// IMPLEMENTAÇÃO DO STOP SCAN
+  @override
+  Future<void> stopScan() async {
+    await methodChannel.invokeMethod('stopScan');
   }
 
   @override
   Future<bool> connect(String address) async {
-    try {
-      final result = await methodChannel.invokeMethod<bool>('connect', {'address': address});
-      return result ?? false;
-    } on PlatformException catch (_) {
-      return false;
-    }
+    // Envia o address (String) para o nativo
+    final result = await methodChannel.invokeMethod<bool>('connect', {'address': address});
+    return result ?? false;
   }
 
   @override
   Future<bool> disconnect() async {
-    try {
-      final result = await methodChannel.invokeMethod<bool>('disconnect');
-      return result ?? false;
-    } catch (_) {
-      return false;
-    }
+    final result = await methodChannel.invokeMethod<bool>('disconnect');
+    return result ?? false;
   }
 
   @override
   Future<bool> printRaw(List<int> bytes) async {
-    try {
-      // Envia os bytes crus (Uint8List) para o nativo
-      final result = await methodChannel.invokeMethod<bool>('print', {'bytes': Uint8List.fromList(bytes)});
-      return result ?? false;
-    } catch (e) {
-      debugPrint("Erro ao imprimir: $e");
-      return false;
-    }
+    final result = await methodChannel.invokeMethod<bool>('print', {'bytes': Uint8List.fromList(bytes)});
+    return result ?? false;
   }
 }

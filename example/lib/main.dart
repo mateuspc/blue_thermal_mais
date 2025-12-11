@@ -12,7 +12,6 @@ void main() {
 }
 
 // 1. CLASSE DE CONFIGURAÇÃO (RAIZ)
-// Cria o MaterialApp e fornece o ScaffoldMessenger para os filhos.
 class MyApp extends StatelessWidget {
   const MyApp({super.key});
 
@@ -20,13 +19,12 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return const MaterialApp(
       debugShowCheckedModeBanner: false,
-      home: PrinterPage(), // Chama a página separada
+      home: PrinterPage(),
     );
   }
 }
 
 // 2. CLASSE DA TELA (LÓGICA)
-// Aqui fica toda a lógica de Bluetooth e UI
 class PrinterPage extends StatefulWidget {
   const PrinterPage({super.key});
 
@@ -42,15 +40,24 @@ class _PrinterPageState extends State<PrinterPage> {
   bool _isLoading = false;
   bool _isBluetoothOn = false;
 
+  // StreamSubscription para poder cancelar o listen se sair da tela
+  StreamSubscription? _scanSubscription;
+
   @override
   void initState() {
     super.initState();
-    // Usamos addPostFrameCallback para garantir que a tela já desenhou
-    // antes de tentar pedir permissão ou mostrar SnackBar
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _checkBluetoothStatus();
       _requestPermissions();
     });
+  }
+
+  @override
+  void dispose() {
+    // Sempre cancele subscriptions e pare o scan ao sair da tela
+    _scanSubscription?.cancel();
+    _blueThermalMais.stopScan();
+    super.dispose();
   }
 
   Future<void> _checkBluetoothStatus() async {
@@ -63,46 +70,69 @@ class _PrinterPageState extends State<PrinterPage> {
   }
 
   Future<void> _requestPermissions() async {
-    // Pede múltiplas permissões necessárias para Android 10, 11, 12+
+    // Permissões completas para Android 12+ e anteriores
     Map<Permission, PermissionStatus> statuses = await [
       Permission.bluetooth,
       Permission.bluetoothScan,
       Permission.bluetoothConnect,
-      Permission.location,
+      Permission.location, // Necessário para Android 11 e inferior
     ].request();
 
     if (statuses.values.every((status) => status.isGranted)) {
-      _scan(); // Se deu tudo certo, inicia o scan
+      _scan();
     } else {
-      _showSnack("Permissões negadas! Verifique as configurações.");
+      _showSnack("Permissões negadas! Verifique as configurações.", color: Colors.red);
     }
   }
 
   void _scan() {
     if (!mounted) return;
+
+    // Cancela scan anterior se houver
+    _scanSubscription?.cancel();
+
     setState(() {
       _isLoading = true;
-      _devices = [];
+      _devices = []; // Limpa a lista visual
     });
 
-    _blueThermalMais.scan().listen((deviceList) {
-      if (!mounted) return;
-      setState(() {
-        _devices = deviceList;
-        _isLoading = false;
+    try {
+      _scanSubscription = _blueThermalMais.scan().listen((deviceList) {
+        if (!mounted) return;
+        setState(() {
+          _devices = deviceList;
+          // Não setamos isLoading = false aqui porque o scan é contínuo
+          // O usuário deve parar manualmente ou ao conectar
+        });
+      }, onError: (e) {
+        if (!mounted) return;
+        setState(() => _isLoading = false);
+        _showSnack("Erro no scan: $e", color: Colors.red);
       });
-    }, onError: (e) {
-      if (!mounted) return;
+    } catch (e) {
       setState(() => _isLoading = false);
-      _showSnack("Erro no scan: $e");
-    });
+      _showSnack("Erro ao iniciar scan: $e", color: Colors.red);
+    }
   }
 
+  void _stopScanManually() {
+    _scanSubscription?.cancel();
+    _blueThermalMais.stopScan();
+    setState(() => _isLoading = false);
+  }
+
+  // --- AQUI ESTÁ A MUDANÇA CRUCIAL PARA O PAREAMENTO ---
   Future<void> _connect(BluetoothDeviceModel device) async {
     if (!mounted) return;
+
+    // 1. Para o scan visualmente e logicamente antes de conectar
+    _stopScanManually();
+
     setState(() => _isLoading = true);
 
     try {
+      // O método connect da sua classe wrapper já tem o stopScan interno
+      // e lança a exceção tratada se precisar parear.
       bool isConnected = await _blueThermalMais.connect(device);
 
       if (!mounted) return;
@@ -110,14 +140,21 @@ class _PrinterPageState extends State<PrinterPage> {
 
       if (isConnected) {
         setState(() => _connectedDevice = device);
-        _showSnack("Conectado a ${device.name}");
+        _showSnack("Conectado a ${device.name}", color: Colors.green);
       } else {
-        _showSnack("Falha ao conectar.");
+        _showSnack("Falha ao conectar (retornou false).", color: Colors.orange);
       }
     } catch (e) {
       if (!mounted) return;
       setState(() => _isLoading = false);
-      _showSnack("Erro: $e");
+
+      // Tratamento específico para a mensagem de pareamento
+      String erro = e.toString();
+      if (erro.contains("Pareamento iniciado")) {
+        _showDialogPairingInfo(); // Mostra um alerta amigável
+      } else {
+        _showSnack("Erro: $erro", color: Colors.red);
+      }
     }
   }
 
@@ -128,49 +165,56 @@ class _PrinterPageState extends State<PrinterPage> {
     _showSnack("Desconectado.");
   }
 
+  // Helper para mostrar alerta de pareamento
+  void _showDialogPairingInfo() {
+    showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text("Pareamento Necessário"),
+          content: const Text(
+              "O Android iniciou o processo de pareamento.\n\n"
+                  "1. Verifique a notificação na barra superior ou um popup na tela.\n"
+                  "2. Digite o PIN (geralmente 0000 ou 1234).\n"
+                  "3. Após parear, toque no dispositivo aqui novamente para conectar."
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text("Entendi")
+            )
+          ],
+        )
+    );
+  }
+
   Future<void> _printTest() async {
     if (_connectedDevice == null) return;
 
     try {
-      // Comandos Manuais (Sem libs extras para evitar erros de versão)
       const List<int> cmdReset = [0x1B, 0x40];
-      const List<int> cmdAlignCenter = [0x1B, 0x61, 0x01];
-      const List<int> cmdAlignLeft = [0x1B, 0x61, 0x00];
-      const List<int> cmdBoldOn = [0x1B, 0x45, 0x01];
-      const List<int> cmdBoldOff = [0x1B, 0x45, 0x00];
       const List<int> cmdFeed3 = [0x1B, 0x64, 0x03];
 
       List<int> bytes = [];
       bytes.addAll(cmdReset);
-
-      bytes.addAll(cmdAlignCenter);
-      bytes.addAll(cmdBoldOn);
-      bytes.addAll(utf8.encode("PLUGIN FLUTTER\n"));
-      bytes.addAll(utf8.encode("BlueThermalMais\n"));
-      bytes.addAll(cmdBoldOff);
-      bytes.addAll(utf8.encode("--------------------------------\n"));
-
-      bytes.addAll(cmdAlignLeft);
-      bytes.addAll(utf8.encode("Item A              R\$ 10,00\n"));
-      bytes.addAll(utf8.encode("Item B              R\$ 20,00\n"));
-      bytes.addAll(utf8.encode("--------------------------------\n"));
-
-      bytes.addAll(cmdBoldOn);
-      bytes.addAll(utf8.encode("TOTAL               R\$ 30,00\n"));
-      bytes.addAll(cmdBoldOff);
-
+      bytes.addAll(utf8.encode("TESTE DE IMPRESSAO\n"));
+      bytes.addAll(utf8.encode("Funciona!\n"));
       bytes.addAll(cmdFeed3);
 
       await _blueThermalMais.printRaw(bytes);
     } catch (e) {
-      _showSnack("Erro ao imprimir: $e");
+      _showSnack("Erro ao imprimir: $e", color: Colors.red);
     }
   }
 
-  void _showSnack(String msg) {
+  void _showSnack(String msg, {Color? color}) {
     if (!mounted) return;
-    // O ScaffoldMessenger agora funciona porque PrinterPage é filho de MaterialApp
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(msg),
+          backgroundColor: color,
+          duration: const Duration(seconds: 3),
+        )
+    );
   }
 
   @override
@@ -179,14 +223,23 @@ class _PrinterPageState extends State<PrinterPage> {
       appBar: AppBar(
         title: const Text('Teste Plugin'),
         actions: [
-          IconButton(
+          if (_isLoading)
+            IconButton(
+              icon: const Icon(Icons.stop_circle_outlined),
+              onPressed: _stopScanManually,
+              tooltip: "Parar Scan",
+            )
+          else
+            IconButton(
               icon: const Icon(Icons.refresh),
-              onPressed: () { _checkBluetoothStatus(); _scan(); }
-          )
+              onPressed: () { _checkBluetoothStatus(); _scan(); },
+              tooltip: "Escanear",
+            )
         ],
       ),
       body: Column(
         children: [
+          // Barra de Status
           Container(
             padding: const EdgeInsets.all(10),
             color: _isBluetoothOn ? Colors.blue[50] : Colors.red[50],
@@ -195,51 +248,75 @@ class _PrinterPageState extends State<PrinterPage> {
                 Icon(_isBluetoothOn ? Icons.bluetooth : Icons.bluetooth_disabled),
                 const SizedBox(width: 10),
                 Text(_isBluetoothOn ? "Bluetooth Ligado" : "Bluetooth Desligado"),
+                if (_isLoading) ...[
+                  const Spacer(),
+                  const SizedBox(width: 15, height: 15, child: CircularProgressIndicator(strokeWidth: 2)),
+                  const SizedBox(width: 10),
+                  const Text("Buscando..."),
+                ]
               ],
             ),
           ),
+
+          // Área de Conectado
           if (_connectedDevice != null)
             Container(
               color: Colors.green[100],
               padding: const EdgeInsets.all(8),
               child: Row(
                 children: [
-                  const Text("Conectado!"),
-                  const Spacer(),
-                  TextButton(onPressed: _disconnect, child: const Text("Sair"))
+                  const Icon(Icons.print, color: Colors.green),
+                  const SizedBox(width: 10),
+                  Expanded(child: Text("Conectado a: ${_connectedDevice!.name}", style: const TextStyle(fontWeight: FontWeight.bold))),
+                  TextButton(onPressed: _disconnect, child: const Text("Desconectar"))
                 ],
               ),
             ),
-          Padding(
-            padding: const EdgeInsets.all(8.0),
-            child: ElevatedButton(
-              onPressed: _isLoading ? null : _requestPermissions,
-              child: Text(_isLoading ? "Buscando..." : "Buscar"),
+
+          // Botão Buscar (se não estiver na AppBar)
+          if (!_isLoading && _connectedDevice == null)
+            Padding(
+              padding: const EdgeInsets.all(8.0),
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.search),
+                onPressed: _requestPermissions,
+                label: const Text("Buscar Dispositivos"),
+              ),
             ),
-          ),
+
+          // Lista de Dispositivos
           Expanded(
-            child: ListView.builder(
+            child: _devices.isEmpty
+                ? const Center(child: Text("Nenhum dispositivo encontrado."))
+                : ListView.builder(
               itemCount: _devices.length,
               itemBuilder: (context, index) {
                 final dev = _devices[index];
+                final isConnected = _connectedDevice?.address == dev.address;
+
                 return ListTile(
-                  title: Text(dev.name),
-                  subtitle: Text(dev.address),
-                  onTap: () => _connect(dev),
-                  trailing: _connectedDevice?.address == dev.address
-                      ? const Icon(Icons.check, color: Colors.green) : null,
+                  leading: Icon(Icons.bluetooth, color: isConnected ? Colors.green : Colors.grey),
+                  title: Text(dev.name.isNotEmpty ? dev.name : "Sem Nome"),
+                  subtitle: Text(dev.address), // No iOS mostra UUID, no Android MAC
+                  onTap: isConnected ? null : () => _connect(dev),
+                  trailing: isConnected
+                      ? const Icon(Icons.check_circle, color: Colors.green)
+                      : const Icon(Icons.chevron_right),
                 );
               },
             ),
           ),
+
+          // Botão de Imprimir
           Padding(
             padding: const EdgeInsets.all(16.0),
             child: SizedBox(
               width: double.infinity,
               height: 50,
               child: ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent, foregroundColor: Colors.white),
                 onPressed: _connectedDevice != null ? _printTest : null,
-                child: const Text("IMPRIMIR TESTE"),
+                child: const Text("IMPRIMIR TESTE", style: TextStyle(fontSize: 18)),
               ),
             ),
           ),
